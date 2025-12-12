@@ -111,6 +111,11 @@ export async function ensureActorHasWriteAccess(
       ...(baseUrl ? { baseUrl } : {}),
     });
 
+  if (allowBotActors && (await isActorBot(octokit, actor))) {
+    core.info(`Actor '${actor}' is a bot account; skipping explicit permission check.`);
+    return { status: "approved", actor };
+  }
+
   core.info(`Checking write access for actor '${actor}' on ${owner}/${repo}`);
 
   let permission: string;
@@ -158,6 +163,17 @@ export async function ensureActorHasWriteAccess(
 function getTokenFromEnv(): string {
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   return token && token.trim().length > 0 ? token : "";
+}
+
+async function isActorBot(octokit: Octokit, actor: string): Promise<boolean> {
+  try {
+    const response = await octokit.users.getByUsername({ username: actor });
+    return (response.data.type ?? "").toLowerCase() === "bot";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    core.debug(`Unable to determine actor type for '${actor}': ${message}`);
+    return false;
+  }
 }
 
 function isNotFoundError(error: unknown): boolean {
