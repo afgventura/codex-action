@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as core from "@actions/core";
 import { Octokit } from "@octokit/rest";
 
@@ -94,6 +95,23 @@ export async function ensureActorHasWriteAccess(
     }
   }
 
+  const sender = getSenderInfoFromEventPayload();
+  const senderType = sender?.type?.toLowerCase();
+  if (
+    allowBotActors &&
+    senderType &&
+    (senderType === "bot" || senderType === "app" || senderType === "integration")
+  ) {
+    const senderLogin = sender?.login ?? actor;
+    if (senderLogin.toLowerCase() !== actor.toLowerCase()) {
+      core.debug(`Sender login '${senderLogin}' does not match actor '${actor}'.`);
+    }
+    core.info(
+      `Actor '${actor}' identified as a GitHub App/bot via event payload (type='${sender.type}'); skipping explicit permission check.`,
+    );
+    return { status: "approved", actor };
+  }
+
   const token = options.token ?? getTokenFromEnv();
   if (!token) {
     return {
@@ -180,4 +198,27 @@ function isNotFoundError(error: unknown): boolean {
   return Boolean(
     error && typeof error === "object" && "status" in error && (error as { status?: number }).status === 404,
   );
+}
+
+function getSenderInfoFromEventPayload(): { login?: string; type?: string } | null {
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!eventPath) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(fs.readFileSync(eventPath, "utf8"));
+    const sender = payload?.sender;
+    if (sender && typeof sender === "object") {
+      const login = typeof sender.login === "string" ? sender.login : undefined;
+      const type = typeof sender.type === "string" ? sender.type : undefined;
+      if (login || type) {
+        return { login, type };
+      }
+    }
+  } catch (error) {
+    core.debug(`Unable to read event payload for sender info: ${String(error)}`);
+  }
+
+  return null;
 }
